@@ -1,5 +1,6 @@
 package org.example.grab.domain.drop.service;
 
+import org.example.grab.domain.drop.dto.PublicDropSort;
 import org.example.grab.domain.drop.dto.request.DropDraftRequest;
 import org.example.grab.domain.drop.dto.request.DropImageRequest;
 import org.example.grab.domain.drop.dto.request.OptionGroupRequest;
@@ -39,6 +40,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.OffsetDateTime;
@@ -97,6 +100,60 @@ class DropServiceTest {
         dropService = new DropService(
                 dropRepository, dropImageRepository, categoryService, wishQueryService, imageStorage,
                 eventPublisher);
+    }
+
+    @Test
+    @DisplayName("인기 정렬과 맞지 않는 status는 저장소를 조회하지 않고 INVALID_REQUEST로 거부한다")
+    void findPublicDrops_rejectsMismatchedPopularitySort() {
+        // given
+        PublicDropSort wishSort = PublicDropSort.parse("wishCount,desc");
+        PublicDropSort grabSort = PublicDropSort.parse("soldQuantity,desc");
+
+        // when & then
+        assertThatThrownBy(() -> dropService.findPublicDrops(null, null, null, null, wishSort, 0, 20))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(CommonErrorCode.INVALID_REQUEST);
+        assertThatThrownBy(() -> dropService.findPublicDrops(DropStatus.WISH, null, null, null, grabSort, 0, 20))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(CommonErrorCode.INVALID_REQUEST);
+        verifyNoInteractions(dropRepository);
+    }
+
+    @Test
+    @DisplayName("인기 WISH 정렬은 정렬 없는 페이지와 정규화한 keyword로 인기 WISH 쿼리를 호출한다")
+    void findPublicDrops_routesWishCountSortToPopularWishQuery() {
+        // given
+        given(dropRepository.findPopularWishDrops(any(), any(), any(), any(), any()))
+                .willReturn(Page.empty());
+
+        // when
+        dropService.findPublicDrops(DropStatus.WISH, 1L, "  50%  ", false,
+                PublicDropSort.parse("wishCount,desc"), 2, 8);
+
+        // then
+        verify(dropRepository).findPopularWishDrops(
+                eq(1L), eq("%50\\%%"), eq(false), any(OffsetDateTime.class), eq(PageRequest.of(2, 8)));
+        verify(dropRepository, never()).findPublicDrops(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("인기 GRAB 정렬은 정렬 없는 페이지로 인기 GRAB 쿼리를 호출한다")
+    void findPublicDrops_routesSoldQuantitySortToPopularGrabQuery() {
+        // given
+        given(dropRepository.findPopularGrabDrops(any(), any(), any(), any(), any()))
+                .willReturn(Page.empty());
+
+        // when
+        dropService.findPublicDrops(DropStatus.GRAB, null, null, true,
+                PublicDropSort.parse("soldQuantity,desc"), 0, 24);
+
+        // then
+        verify(dropRepository).findPopularGrabDrops(
+                eq(null), eq(null), eq(true), any(OffsetDateTime.class), eq(PageRequest.of(0, 24)));
+        verify(dropRepository, never()).findPublicDrops(any(), any(), any(), any(), any());
+        verify(dropRepository, never()).findPopularWishDrops(any(), any(), any(), any(), any());
     }
 
     @Test
