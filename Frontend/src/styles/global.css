@@ -51,6 +51,7 @@ a:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
+.popular-rail:focus-visible,
 /* 검색 입력은 테두리가 없어 감싸는 박스에 표시한다 */
 .search-box:focus-within {
   outline: 3px solid #7fa61f;
@@ -297,6 +298,72 @@ main {
   transform: rotate(-7deg);
 }
 
+.home-section {
+  margin-top: 58px;
+}
+.home-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.home-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.popular-rail {
+  --rail-gap: 18px;
+  --rail-visible: 4;
+  outline-offset: 4px;
+}
+.popular-viewport {
+  overflow: hidden;
+}
+.popular-track {
+  display: flex;
+  gap: var(--rail-gap);
+  transition: transform 0.32s ease;
+  transform: translateX(
+    calc(
+      -1 * var(--rail-index, 0) *
+        (
+          (100% - (var(--rail-visible) - 1) * var(--rail-gap)) /
+            var(--rail-visible) + var(--rail-gap)
+        )
+    )
+  );
+}
+.popular-item {
+  flex: 0 0
+    calc(
+      (100% - (var(--rail-visible) - 1) * var(--rail-gap)) / var(--rail-visible)
+    );
+  min-width: 0;
+}
+.popular-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px 20px;
+  margin-top: 20px;
+  font-size: 13px;
+}
+.popular-info .secondary-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.popular-position {
+  min-width: 52px;
+  color: var(--muted);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.popular-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .catalog-controls {
   display: flex;
   align-items: center;
@@ -408,7 +475,8 @@ main {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 28px 18px;
 }
-.catalog-grid .product-card h2 {
+.catalog-grid .product-card h2,
+.popular-rail .product-card h2 {
   display: -webkit-box;
   min-height: 2.8em;
   font-size: 16px;
@@ -417,7 +485,8 @@ main {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
-.catalog-grid .card-bottom {
+.catalog-grid .card-bottom,
+.popular-rail .card-bottom {
   flex-wrap: wrap;
   gap: 8px;
 }
@@ -450,29 +519,40 @@ main {
     flex-wrap: wrap;
     gap: 8px;
   }
+  .home-section {
+    margin-top: 40px;
+  }
+  .popular-rail {
+    --rail-gap: 12px;
+  }
   .product-grid.catalog-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 24px 12px;
   }
-  .catalog-grid .product-card h2 {
+  .catalog-grid .product-card h2,
+  .popular-rail .product-card h2 {
     font-size: 14px;
   }
-  .catalog-grid .card-bottom {
+  .catalog-grid .card-bottom,
+  .popular-rail .card-bottom {
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
   }
-  .catalog-grid .wish-button {
+  .catalog-grid .wish-button,
+  .popular-rail .wish-button {
     width: 100%;
     padding: 0 6px;
   }
-  .catalog-grid .badge {
+  .catalog-grid .badge,
+  .popular-rail .badge {
     top: 8px;
     left: 8px;
     padding: 5px 6px;
     font-size: 9px;
   }
-  .catalog-grid .schedule {
+  .catalog-grid .schedule,
+  .popular-rail .schedule {
     min-height: 2.8em;
     font-size: 11px;
     line-height: 1.4;
