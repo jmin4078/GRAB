@@ -1,6 +1,7 @@
 package org.example.grab.domain.auth.repository;
 
 import org.example.grab.domain.auth.support.RefreshTokenHasher;
+import org.example.grab.domain.auth.support.RefreshTokenProperties;
 import org.example.grab.domain.auth.support.RefreshTokenTtlCalculator;
 import org.example.grab.global.error.BusinessException;
 import org.example.grab.global.error.CommonErrorCode;
@@ -19,21 +20,23 @@ import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
-import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 
@@ -43,8 +46,10 @@ class RefreshTokenRepositoryTest {
 
     private static final String RAW_TOKEN = "Xk3_vQ9aT1mZ0bR7cY2wL5nP8sD4fH6jK1gE3uA9qWo";
     private static final String KEY = RefreshTokenHasher.toKey(RAW_TOKEN);
+    private static final String HASH = RefreshTokenHasher.hash(RAW_TOKEN);
     private static final RefreshTokenSession SESSION = new RefreshTokenSession(
             7L, UUID.fromString("3f2a9c1e-5b7d-4e8a-9c0f-1a2b3c4d5e6f"), Instant.parse("2026-10-31T06:00:00Z"));
+    private static final List<String> SAVE_KEYS = List.of(KEY, RefreshTokenHasher.toSessionKey(SESSION.sessionId()));
     private static final String SESSION_JSON =
             "{\"userId\":7,\"sessionId\":\"3f2a9c1e-5b7d-4e8a-9c0f-1a2b3c4d5e6f\",\"sessionExpiresAt\":\"2026-10-31T06:00:00Z\"}";
 
@@ -61,11 +66,12 @@ class RefreshTokenRepositoryTest {
     @BeforeEach
     void setUp() {
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        repository = new RefreshTokenRepository(redisTemplate, objectMapper, ttlCalculator);
+        repository = new RefreshTokenRepository(redisTemplate, objectMapper, ttlCalculator,
+                new RefreshTokenProperties(Duration.ofDays(14), Duration.ofDays(30), Duration.ofSeconds(10)));
     }
 
     @Test
-    @DisplayName("save는 해시 키에 세션 JSON을 계산한 TTL로 저장하고 그 TTL을 돌려준다")
+    @DisplayName("save는 해시 키에 세션 JSON을, 세션 키에 토큰 해시를 계산한 TTL(초)로 함께 저장하고 그 TTL을 돌려준다")
     void saveStoresSessionUnderHashedKeyWithTtl() {
         // given
         given(ttlCalculator.calculateTtl(SESSION.sessionExpiresAt())).willReturn(Duration.ofDays(14));
@@ -76,7 +82,8 @@ class RefreshTokenRepositoryTest {
 
         // then
         assertThat(ttl).isEqualTo(Duration.ofDays(14));
-        then(valueOperations).should().set(eq(KEY), value.capture(), eq(Duration.ofDays(14)));
+        then(redisTemplate).should().execute(any(RedisScript.class), eq(SAVE_KEYS),
+                value.capture(), eq(HASH), eq(String.valueOf(Duration.ofDays(14).toSeconds())));
         assertThat(value.getValue()).doesNotContain(RAW_TOKEN);
         assertThat(objectMapper.readValue(value.getValue(), RefreshTokenSession.class)).isEqualTo(SESSION);
     }
@@ -92,7 +99,7 @@ class RefreshTokenRepositoryTest {
         repository.save(RAW_TOKEN, SESSION);
 
         // then
-        then(valueOperations).should().set(anyString(), value.capture(), any(Duration.class));
+        then(redisTemplate).should().execute(any(RedisScript.class), anyList(), value.capture(), anyString(), anyString());
         assertThat(objectMapper.readTree(value.getValue())).isEqualTo(objectMapper.readTree(SESSION_JSON));
     }
 
@@ -106,7 +113,7 @@ class RefreshTokenRepositoryTest {
         assertThatThrownBy(() -> repository.save(RAW_TOKEN, SESSION))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getErrorCode()).isEqualTo(CommonErrorCode.INVALID_TOKEN));
-        then(valueOperations).should(never()).set(anyString(), anyString(), any(Duration.class));
+        then(redisTemplate).should(never()).execute(any(RedisScript.class), anyList(), any(Object[].class));
     }
 
     @Test
@@ -194,7 +201,7 @@ class RefreshTokenRepositoryTest {
         // given
         RedisConnectionFailureException failure = new RedisConnectionFailureException("Redis 연결 실패");
         given(ttlCalculator.calculateTtl(any())).willReturn(Duration.ofDays(14));
-        willThrow(failure).given(valueOperations).set(anyString(), anyString(), any(Duration.class));
+        given(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class))).willThrow(failure);
 
         // when & then
         assertThatThrownBy(() -> repository.save(RAW_TOKEN, SESSION)).isSameAs(failure);

@@ -83,21 +83,58 @@ class RefreshTokenRepositoryIntegrationTest {
     }
 
     @Test
-    @DisplayName("저장 직후 해시 키만 있고 원문 키는 없으며, TTL이 설정값 이하이고 만료 없음(-1)이 아니다")
+    @DisplayName("저장 직후 해시 키와 세션 키만 있고 원문 키는 없으며, TTL이 설정값 이하이고 만료 없음(-1)이 아니다")
     void savesUnderHashedKeyWithTtl() {
         // given
         String rawToken = generator.generate();
+        RefreshTokenSession session = sessionExpiringAt(Instant.now().plus(30, ChronoUnit.DAYS));
 
         // when
-        repository.save(rawToken, sessionExpiringAt(Instant.now().plus(30, ChronoUnit.DAYS)));
+        repository.save(rawToken, session);
 
         // then
         String key = RefreshTokenHasher.toKey(rawToken);
-        assertThat(redisTemplate.keys("*")).containsExactly(key);
+        String sessionKey = RefreshTokenHasher.toSessionKey(session.sessionId());
+        assertThat(redisTemplate.keys("*")).containsExactlyInAnyOrder(key, sessionKey);
         assertThat(redisTemplate.hasKey(rawToken)).isFalse();
         assertThat(redisTemplate.hasKey("auth:refresh-token:" + rawToken)).isFalse();
         // -1은 TTL 없음, -2는 키 없음
         assertThat(redisTemplate.getExpire(key, TimeUnit.MILLISECONDS)).isBetween(1L, IDLE_TTL.toMillis());
+    }
+
+    // GR-35 M00-02: 재사용 탐지 때 세션에서 현재 토큰을 찾을 수 있어야 한다
+    @Test
+    @DisplayName("세션 키는 원문이 아니라 토큰 해시를 담고, 토큰 키와 같은 TTL을 갖는다")
+    void saveWritesSessionKeyWithSameTtl() {
+        // given
+        String rawToken = generator.generate();
+        RefreshTokenSession session = sessionExpiringAt(Instant.now().plus(30, ChronoUnit.DAYS));
+
+        // when
+        repository.save(rawToken, session);
+
+        // then
+        String sessionKey = RefreshTokenHasher.toSessionKey(session.sessionId());
+        assertThat(redisTemplate.opsForValue().get(sessionKey)).isEqualTo(RefreshTokenHasher.hash(rawToken));
+        assertThat(redisTemplate.getExpire(sessionKey, TimeUnit.SECONDS))
+                .isEqualTo(redisTemplate.getExpire(RefreshTokenHasher.toKey(rawToken), TimeUnit.SECONDS))
+                .isPositive();
+    }
+
+    @Test
+    @DisplayName("같은 세션으로 다시 저장하면 세션 키가 새 토큰 해시로 바뀐다")
+    void saveOverwritesSessionKeyForSameSession() {
+        // given
+        RefreshTokenSession session = sessionExpiringAt(Instant.now().plus(30, ChronoUnit.DAYS));
+        repository.save(generator.generate(), session);
+        String newToken = generator.generate();
+
+        // when
+        repository.save(newToken, session);
+
+        // then
+        assertThat(redisTemplate.opsForValue().get(RefreshTokenHasher.toSessionKey(session.sessionId())))
+                .isEqualTo(RefreshTokenHasher.hash(newToken));
     }
 
     @Test
@@ -144,8 +181,8 @@ class RefreshTokenRepositoryIntegrationTest {
         // when
         Duration ttl = repository.save(rawToken, session);
 
-        // then: 반환값은 남은 시간이고, Redis TTL은 저장 후 흐른 시간만큼만 짧다
-        assertThat(ttl).isLessThan(IDLE_TTL).isPositive();
+        // then: 반환값은 남은 시간을 초 단위로 내린 1초이고(GR-35 M00-05), Redis TTL은 저장 후 흐른 시간만큼만 짧다
+        assertThat(ttl).isEqualTo(Duration.ofSeconds(1));
         Long redisTtlMillis = redisTemplate.getExpire(RefreshTokenHasher.toKey(rawToken), TimeUnit.MILLISECONDS);
         assertThat(redisTtlMillis).isBetween(ttl.toMillis() - 300, ttl.toMillis());
     }
