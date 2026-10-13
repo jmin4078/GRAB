@@ -4,7 +4,10 @@ import jakarta.persistence.EntityManager;
 import org.example.grab.global.config.JpaConfig;
 import org.example.grab.domain.drop.dto.PublicDropListProjection;
 import org.example.grab.domain.drop.dto.PublicDropSort;
+import org.example.grab.domain.drop.dto.SellerDropListProjection;
 import org.example.grab.domain.drop.entity.Drop;
+import org.example.grab.domain.drop.entity.DropImage;
+import org.example.grab.domain.drop.entity.DropImageType;
 import org.example.grab.domain.drop.entity.DropStatus;
 import org.example.grab.domain.drop.entity.option.DropOption;
 import org.example.grab.domain.drop.entity.option.DropOptionGroup;
@@ -177,6 +180,96 @@ class DropRepositoryTest {
         Drop found = dropRepository.findById(dropId).orElseThrow();
         assertThat(found.getOptions()).hasSize(1);
         assertThat(found.getOptions().get(0).getValueMaps()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("이미지 용도를 저장하고 다시 읽으며, 순서는 용도마다 0부터 따로 매긴다")
+    void savesImageTypeWithSortOrderPerType() {
+        // given
+        Drop drop = Drop.createDraft(sellerId);
+        drop.addImage(DropImage.create(drop, UUID.randomUUID(), "gallery.jpg", DropImageType.GALLERY, 0, "갤러리"));
+        drop.addImage(DropImage.create(drop, UUID.randomUUID(), "detail.jpg", DropImageType.DETAIL, 0, "상세"));
+
+        // when
+        Long dropId = dropRepository.saveAndFlush(drop).getId();
+        entityManager.clear();
+
+        // then
+        Map<String, DropImageType> typeByUrl = dropRepository.findById(dropId).orElseThrow().getImages().stream()
+                .collect(Collectors.toMap(DropImage::getImageUrl, DropImage::getImageType));
+        assertThat(typeByUrl).containsExactlyInAnyOrderEntriesOf(
+                Map.of("gallery.jpg", DropImageType.GALLERY, "detail.jpg", DropImageType.DETAIL));
+    }
+
+    @Test
+    @DisplayName("같은 DROP·같은 용도에서 순서가 겹치면 저장에 실패한다")
+    void rejectsDuplicateSortOrderWithinType() {
+        // given
+        Long dropId = insertPublishedDrop(DropStatus.WISH, "이미지 상품");
+        insertTypedImage(dropId, "DETAIL", 0);
+
+        // when & then
+        assertThatThrownBy(() -> insertTypedImage(dropId, "DETAIL", 0))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("GALLERY·DETAIL 외의 용도와 용도 누락 시 기본값을 제약대로 처리한다")
+    void enforcesImageTypeValues() {
+        // given
+        Long dropId = insertPublishedDrop(DropStatus.WISH, "이미지 상품");
+
+        // when: 용도를 생략하면 GALLERY로 저장된다
+        jdbcTemplate.update(
+                "INSERT INTO drop_images (drop_id, image_url, sort_order, alt_text) VALUES (?, 'legacy.jpg', 0, '상품')",
+                dropId);
+
+        // then
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT image_type FROM drop_images WHERE drop_id = ?", String.class, dropId))
+                .isEqualTo("GALLERY");
+        assertThatThrownBy(() -> insertTypedImage(dropId, "BANNER", 1))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("공개 목록 썸네일은 GALLERY의 첫 이미지이고 DETAIL만 있으면 null이다")
+    void publicListThumbnailUsesGalleryOnly() {
+        // given: DETAIL이 GALLERY보다 먼저 저장되고 순서 번호도 같다
+        Long mixed = insertPublishedDrop(DropStatus.WISH, "혼합");
+        Long detailOnly = insertPublishedDrop(DropStatus.WISH, "상세만");
+        insertTypedImage(mixed, "DETAIL", 0);
+        insertImage(mixed, "https://img/gallery-1.jpg", 1);
+        insertImage(mixed, "https://img/gallery-0.jpg", 0);
+        insertTypedImage(detailOnly, "DETAIL", 0);
+
+        // when
+        Page<PublicDropListProjection> page = dropRepository.findPublicDrops(
+                List.of("WISH"), null, null, null, PageRequest.of(0, 20));
+
+        // then
+        assertThat(rowOf(page, mixed).getThumbnailUrl()).isEqualTo("https://img/gallery-0.jpg");
+        assertThat(rowOf(page, detailOnly).getThumbnailUrl()).isNull();
+    }
+
+    @Test
+    @DisplayName("판매자 목록 썸네일은 GALLERY의 첫 이미지이고 DETAIL만 있으면 null이다")
+    void sellerListThumbnailUsesGalleryOnly() {
+        // given
+        Long mixed = insertPublishedDrop(DropStatus.WISH, "혼합");
+        Long detailOnly = insertPublishedDrop(DropStatus.WISH, "상세만");
+        insertTypedImage(mixed, "DETAIL", 0);
+        insertImage(mixed, "https://img/gallery-1.jpg", 1);
+        insertImage(mixed, "https://img/gallery-0.jpg", 0);
+        insertTypedImage(detailOnly, "DETAIL", 0);
+
+        // when
+        List<SellerDropListProjection> rows =
+                dropRepository.findSellerDrops(sellerId, null, PageRequest.of(0, 20)).getContent();
+
+        // then
+        assertThat(sellerRowOf(rows, mixed).getThumbnailUrl()).isEqualTo("https://img/gallery-0.jpg");
+        assertThat(sellerRowOf(rows, detailOnly).getThumbnailUrl()).isNull();
     }
 
     @Test
@@ -996,6 +1089,15 @@ class DropRepositoryTest {
                 dropId, imageUrl, sortOrder);
     }
 
+    private void insertTypedImage(Long dropId, String imageType, int sortOrder) {
+        jdbcTemplate.update(
+                """
+                INSERT INTO drop_images (drop_id, image_url, image_type, sort_order, alt_text)
+                VALUES (?, ?, ?, ?, '상품')
+                """,
+                dropId, "https://img/" + UUID.randomUUID() + ".jpg", imageType, sortOrder);
+    }
+
     private void insertWish(Long userId, Long dropId, boolean canceled) {
         jdbcTemplate.update(
                 """
@@ -1020,6 +1122,10 @@ class DropRepositoryTest {
                 .filter(projection -> projection.getDropId().equals(dropId))
                 .findFirst()
                 .orElseThrow();
+    }
+
+    private SellerDropListProjection sellerRowOf(List<SellerDropListProjection> rows, Long dropId) {
+        return rows.stream().filter(row -> row.getDropId().equals(dropId)).findFirst().orElseThrow();
     }
 
     private List<Long> idsOf(Page<PublicDropListProjection> page) {

@@ -73,7 +73,7 @@ class DropTest {
         // given
         for (DropStatus status : List.of(DropStatus.GRAB, DropStatus.ENDED)) {
             Drop drop = dropWith(status, OffsetDateTime.now(), OffsetDateTime.now().plusHours(1));
-            drop.addImage(DropImage.create(drop, UUID.randomUUID(), "https://example.com/a.jpg", 0, "상품"));
+            drop.addImage(DropImage.create(drop, UUID.randomUUID(), "https://example.com/a.jpg", DropImageType.GALLERY, 0, "상품"));
             addOption(drop, 1000L, 5, true);
 
             // when & then: 핵심 판매 조건 변경과 자식 초기화가 모두 막힌다
@@ -81,7 +81,7 @@ class DropTest {
                     .as("updateDraft status=%s", status)
                     .isInstanceOf(BusinessException.class)
                     .extracting("errorCode").isEqualTo(DropErrorCode.DROP_NOT_EDITABLE);
-            assertThatThrownBy(drop::clearImages)
+            assertThatThrownBy(() -> drop.clearImages(DropImageType.GALLERY))
                     .as("clearImages status=%s", status)
                     .isInstanceOf(BusinessException.class)
                     .extracting("errorCode").isEqualTo(DropErrorCode.DROP_NOT_EDITABLE);
@@ -145,18 +145,35 @@ class DropTest {
     }
 
     @Test
-    @DisplayName("clearImages는 기존 이미지를 모두 제거한다")
+    @DisplayName("이미지는 용도별로 나눠 용도 안의 sortOrder 순으로 반환한다")
+    void splitsImagesByTypeInSortOrder() {
+        // given: 추가 순서와 용도를 섞는다
+        Drop drop = Drop.createDraft(SELLER_ID);
+        drop.addImage(DropImage.create(drop, UUID.randomUUID(), "d1.jpg", DropImageType.DETAIL, 1, "d1"));
+        drop.addImage(DropImage.create(drop, UUID.randomUUID(), "g1.jpg", DropImageType.GALLERY, 1, "g1"));
+        drop.addImage(DropImage.create(drop, UUID.randomUUID(), "d0.jpg", DropImageType.DETAIL, 0, "d0"));
+        drop.addImage(DropImage.create(drop, UUID.randomUUID(), "g0.jpg", DropImageType.GALLERY, 0, "g0"));
+
+        // when & then
+        assertThat(drop.getGalleryImages()).extracting(DropImage::getImageUrl).containsExactly("g0.jpg", "g1.jpg");
+        assertThat(drop.getDetailImages()).extracting(DropImage::getImageUrl).containsExactly("d0.jpg", "d1.jpg");
+    }
+
+    @Test
+    @DisplayName("clearImages는 지정한 용도의 이미지만 제거하고 다른 용도는 남긴다")
     void clearImages() {
         // given
         Drop drop = Drop.createDraft(SELLER_ID);
-        drop.addImage(DropImage.create(drop, UUID.randomUUID(), "a.jpg", 0, "a"));
-        drop.addImage(DropImage.create(drop, UUID.randomUUID(), "b.jpg", 1, "b"));
+        drop.addImage(DropImage.create(drop, UUID.randomUUID(), "a.jpg", DropImageType.GALLERY, 0, "a"));
+        drop.addImage(DropImage.create(drop, UUID.randomUUID(), "b.jpg", DropImageType.GALLERY, 1, "b"));
+        drop.addImage(DropImage.create(drop, UUID.randomUUID(), "d.jpg", DropImageType.DETAIL, 0, "d"));
 
         // when
-        drop.clearImages();
+        drop.clearImages(DropImageType.GALLERY);
 
         // then
-        assertThat(drop.getImages()).isEmpty();
+        assertThat(drop.getGalleryImages()).isEmpty();
+        assertThat(drop.getDetailImages()).extracting(DropImage::getImageUrl).containsExactly("d.jpg");
     }
 
     @Test
