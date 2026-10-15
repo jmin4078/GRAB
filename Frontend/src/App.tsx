@@ -41,7 +41,7 @@ export default function App() {
     setToast(message)
     window.setTimeout(() => setToast(''), 2600)
   }
-  const { account, authenticated, login, logout } = useAuth()
+  const { user, status, authenticated, login, logout } = useAuth()
   const { wishes, wishesReady, toggleWish } = useWish(authenticated, notify)
   const { orders, buyerOrders, addOrder, updateBuyerOrder } = useOrders()
   const [sellerApplications, setSellerApplications] = useState(
@@ -58,7 +58,7 @@ export default function App() {
       const existing = current.find((drop) => drop.id === draft.id)
       const next = dropFromDraft(
         draft,
-        existing?.ownerEmail ?? account?.email ?? 'grab@example.com',
+        existing?.ownerEmail ?? user?.email ?? 'grab@example.com',
       )
       return [next, ...current.filter((drop) => drop.id !== draft.id)]
     })
@@ -66,6 +66,7 @@ export default function App() {
 
   const shared: SharedProps = {
     authenticated,
+    authStatus: status,
     wishes,
     wishesReady,
     orders,
@@ -96,7 +97,7 @@ export default function App() {
             path="/checkout/:orderId"
             element={
               <CheckoutPage
-                authenticated={authenticated}
+                authStatus={status}
                 buyerOrders={buyerOrders}
                 updateBuyerOrder={updateBuyerOrder}
                 notify={notify}
@@ -107,7 +108,7 @@ export default function App() {
             path="/my/orders/:orderId"
             element={
               <OrderDetailPage
-                authenticated={authenticated}
+                authStatus={status}
                 buyerOrders={buyerOrders}
                 updateBuyerOrder={updateBuyerOrder}
                 notify={notify}
@@ -120,38 +121,41 @@ export default function App() {
               <MyPage
                 {...shared}
                 buyerOrders={buyerOrders}
-                account={account}
-                onAccountChange={login}
+                user={user}
                 onLogout={logout}
               />
             }
           />
           <Route
             path="/login"
-            element={<LoginPage onLogin={login} notify={notify} />}
+            element={<LoginPage login={login} notify={notify} />}
           />
-          <Route
-            path="/signup"
-            element={<SignupPage onLogin={login} notify={notify} />}
-          />
+          <Route path="/signup" element={<SignupPage notify={notify} />} />
           <Route
             path="/seller"
             element={
               <SellerDashboardPage
                 drops={sellerDrops}
-                ownerEmail={account?.email ?? 'grab@example.com'}
+                ownerEmail={user?.email ?? 'grab@example.com'}
               />
             }
           />
           <Route
             path="/seller/apply"
-            element={<SellerApplyPage account={account} notify={notify} />}
+            element={
+              <SellerApplyPage
+                user={user}
+                authStatus={status}
+                notify={notify}
+              />
+            }
           />
           <Route
             path="/admin/seller-applications"
             element={
               <AdminSellerApplicationsPage
-                account={account}
+                user={user}
+                authStatus={status}
                 applications={sellerApplications}
                 onReview={(id, status, reason) =>
                   setSellerApplications((current) =>
@@ -170,9 +174,10 @@ export default function App() {
             path="/seller/inventory"
             element={
               <SellerInventoryPage
-                account={account}
+                user={user}
+                authStatus={status}
                 drops={sellerDrops}
-                ownerEmail={account?.email ?? 'grab@example.com'}
+                ownerEmail={user?.email ?? 'grab@example.com'}
               />
             }
           />
@@ -180,9 +185,10 @@ export default function App() {
             path="/seller/sales"
             element={
               <SellerSalesPage
-                account={account}
+                user={user}
+                authStatus={status}
                 drops={sellerDrops}
-                ownerEmail={account?.email ?? 'grab@example.com'}
+                ownerEmail={user?.email ?? 'grab@example.com'}
               />
             }
           />
@@ -190,9 +196,10 @@ export default function App() {
             path="/seller/drops"
             element={
               <SellerDropsPage
-                account={account}
+                user={user}
+                authStatus={status}
                 drops={sellerDrops}
-                ownerEmail={account?.email ?? 'grab@example.com'}
+                ownerEmail={user?.email ?? 'grab@example.com'}
                 onChange={setSellerDrops}
                 notify={notify}
               />
@@ -228,9 +235,10 @@ export default function App() {
             path="/seller/drops/:dropId"
             element={
               <SellerDropDetailPage
-                account={account}
+                user={user}
+                authStatus={status}
                 drops={sellerDrops}
-                ownerEmail={account?.email ?? 'grab@example.com'}
+                ownerEmail={user?.email ?? 'grab@example.com'}
                 onChange={setSellerDrops}
                 notify={notify}
               />
