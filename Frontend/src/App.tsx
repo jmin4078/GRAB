@@ -6,6 +6,7 @@ import useAuth from './features/auth/logic/useAuth'
 import { isSeller } from './features/auth/logic/authUser'
 import useOrders from './features/order/logic/useOrders'
 import useWish from './features/wish/logic/useWish'
+import AuthCallbackPage from './pages/AuthCallback/AuthCallbackPage'
 import CheckoutPage from './pages/Checkout/CheckoutPage'
 import DropDetailPage from './pages/DropDetail/DropDetailPage'
 import DropListPage from './pages/DropList/DropListPage'
@@ -34,7 +35,7 @@ export default function App() {
     setToast(message)
     window.setTimeout(() => setToast(''), 2600)
   }
-  const { user, status, authenticated, login, logout } = useAuth()
+  const { user, status, authenticated, login, refresh, logout } = useAuth()
   const { wishes, wishesReady, toggleWish } = useWish(authenticated, notify)
   const { buyerOrders, addOrder, updateBuyerOrder } = useOrders()
 
@@ -89,7 +90,14 @@ export default function App() {
             path="/login"
             element={<LoginPage login={login} notify={notify} />}
           />
-          <Route path="/signup" element={<SignupPage notify={notify} />} />
+          <Route
+            path="/auth/callback"
+            element={<AuthCallbackPage refreshAuth={refresh} notify={notify} />}
+          />
+          <Route
+            path="/signup"
+            element={<SignupPage refreshAuth={refresh} notify={notify} />}
+          />
           <Route path="/seller" element={<SellerDashboardPage />} />
           <Route
             path="/seller/apply"
