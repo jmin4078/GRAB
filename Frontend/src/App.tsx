@@ -4,7 +4,6 @@ import Footer from './components/Footer/Footer'
 import Header from './components/Header/Header'
 import useAuth from './features/auth/logic/useAuth'
 import { isSeller } from './features/auth/logic/authUser'
-import useOrders from './features/order/logic/useOrders'
 import useWish from './features/wish/logic/useWish'
 import AuthCallbackPage from './pages/AuthCallback/AuthCallbackPage'
 import CheckoutPage from './pages/Checkout/CheckoutPage'
@@ -37,7 +36,6 @@ export default function App() {
   }
   const { user, status, authenticated, login, refresh, logout } = useAuth()
   const { wishes, wishesReady, toggleWish } = useWish(authenticated, notify)
-  const { buyerOrders, addOrder, updateBuyerOrder } = useOrders()
 
   const shared: SharedProps = {
     authenticated,
@@ -46,7 +44,6 @@ export default function App() {
     wishesReady,
     notify,
     toggleWish,
-    addOrder,
   }
 
   return (
@@ -68,15 +65,12 @@ export default function App() {
             element={<DropDetailPage {...shared} />}
           />
           <Route
+            path="/checkout"
+            element={<CheckoutPage authStatus={status} notify={notify} />}
+          />
+          <Route
             path="/checkout/:orderId"
-            element={
-              <CheckoutPage
-                authStatus={status}
-                buyerOrders={buyerOrders}
-                updateBuyerOrder={updateBuyerOrder}
-                notify={notify}
-              />
-            }
+            element={<CheckoutPage authStatus={status} notify={notify} />}
           />
           <Route
             path="/my/orders/:orderId"
