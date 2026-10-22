@@ -80,6 +80,8 @@ test.describe('상품 탐색', () => {
       route.abort(),
     )
     await page.goto('/#/drops/102')
+    await expect(page.locator('.detail-gallery')).toBeVisible()
+    await expect(page.locator('.detail-gallery .badge')).toHaveCount(0)
     await expect(
       page.getByRole('group', {
         name: '나의 작은 휴식, 데일리 머그 상품 갤러리',
@@ -97,6 +99,8 @@ test.describe('상품 탐색', () => {
     ).toBeVisible()
 
     await page.goto('/#/drops/101')
+    await expect(page.locator('.detail-gallery')).toBeVisible()
+    await expect(page.locator('.detail-gallery .badge')).toHaveCount(0)
     await expect(page.locator('.detail-thumbnails')).toHaveCount(0)
     await expect(page.locator('.detail-media img')).toHaveAttribute(
       'alt',
@@ -128,6 +132,7 @@ test.describe('상품 탐색', () => {
       .first()
     await expect(grabCard.locator('.creator')).not.toBeEmpty()
     await expect(grabCard).toContainText('남은 수량')
+    await expect(grabCard.locator('.badge')).toHaveCount(0)
 
     await page.goto('/#/wish')
     const wishCard = page
@@ -148,6 +153,8 @@ test.describe('상품 탐색', () => {
       .click()
 
     await expect(page).toHaveURL(/#\/drops\/201$/)
+    await expect(page.locator('.detail-gallery')).toBeVisible()
+    await expect(page.locator('.detail-gallery .badge')).toHaveCount(0)
     await expect(
       page.getByRole('button', { name: '옵션을 선택해주세요' }),
     ).toBeDisabled()

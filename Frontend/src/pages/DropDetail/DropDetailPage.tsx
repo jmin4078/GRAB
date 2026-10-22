@@ -162,7 +162,6 @@ export default function DropDetailPage({
         <DropGallery
           key={detail.id}
           name={detail.name}
-          status={detail.status}
           images={detail.galleryImages}
         />
         <div className="detail-summary">
