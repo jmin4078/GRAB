@@ -1,16 +1,16 @@
-import { useState, type FormEvent } from 'react'
+import { useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getMyWishes } from '../../api/wish/wishes'
 import EmptyState from '../../components/EmptyState/EmptyState'
 import AuthLoading from '../../features/auth/components/AuthLoading'
+import NicknameForm from '../../features/auth/components/NicknameForm'
+import PasswordChangeForm from '../../features/auth/components/PasswordChangeForm'
 import {
   isAdmin,
   isSeller,
   type AuthUser,
 } from '../../features/auth/logic/authUser'
-import { nicknameError } from '../../features/auth/logic/signupValidation'
-import { mockSignupErrors } from '../../features/auth/mock/mockAuth'
 import { wishKeys } from '../../features/wish/logic/queryKeys'
 import { buyerOrderStatusText } from '../../features/order/logic/buyerOrderView'
 import { useMyOrders } from '../../features/order/logic/useBuyerOrders'
@@ -46,11 +46,6 @@ export default function MyPage({
   const [editing, setEditing] = useState(false)
   const [page, setPage] = useState(0)
   const [orderPage, setOrderPage] = useState(0)
-  const [nickname, setNickname] = useState(user?.nickname ?? '')
-  const [saveResult, setSaveResult] = useState<'success' | 'nickname' | 'save'>(
-    'success',
-  )
-  const [error, setError] = useState('')
   const [loggingOut, setLoggingOut] = useState(false)
   const [logoutError, setLogoutError] = useState('')
 
@@ -76,23 +71,6 @@ export default function MyPage({
   if (!user && loggingOut) return <AuthLoading />
   if (!user)
     return <Navigate to="/login" state={{ from: location.pathname }} replace />
-
-  const saveNickname = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const invalid = nicknameError(nickname)
-    if (invalid) {
-      setError(invalid)
-      return
-    }
-    if (saveResult !== 'success') {
-      setError(mockSignupErrors[saveResult])
-      return
-    }
-    // 사용자 정보가 users/me 캐시라 화면에서만 바꾼 값은 저장되지 않는다. 실제 연동 전까지 안내만 한다(M00-07).
-    setEditing(false)
-    setError('')
-    notify('닉네임 변경은 API 연동 후 제공됩니다.')
-  }
 
   const logout = async () => {
     if (loggingOut) return
@@ -128,57 +106,24 @@ export default function MyPage({
           <button
             type="button"
             className="secondary-button"
-            onClick={() => {
-              setEditing(!editing)
-              setError('')
-              setNickname(user.nickname)
-            }}
+            aria-expanded={editing}
+            onClick={() => setEditing(!editing)}
           >
             {editing ? '닫기' : '정보 수정'}
           </button>
         </div>
         {editing && (
-          <form className="account-edit" onSubmit={saveNickname}>
-            <label>
-              이메일
-              <input readOnly value={user.email} />
-            </label>
-            <label>
-              닉네임 변경
-              <input
-                required
-                value={nickname}
-                onChange={(event) => setNickname(event.target.value)}
-              />
-            </label>
-            <label className="demo-select">
-              편집 결과 예시
-              <select
-                value={saveResult}
-                onChange={(event) => {
-                  setSaveResult(event.target.value as typeof saveResult)
-                  setError('')
-                }}
-              >
-                <option value="success">저장 성공</option>
-                <option value="nickname">닉네임 중복</option>
-                <option value="save">저장 실패</option>
-              </select>
-            </label>
-            {error && (
-              <p className="form-error" role="alert">
-                {error}
-              </p>
+          <>
+            <NicknameForm user={user} notify={notify} />
+            {user.provider === 'LOCAL' && (
+              <PasswordChangeForm notify={notify} />
             )}
-            <button type="submit" className="primary-button">
-              저장
-            </button>
-          </form>
+          </>
         )}
         <div className="account-footer">
           <p>
             {user.provider === 'LOCAL'
-              ? 'LOCAL 계정의 비밀번호 변경과 프로필 이미지 관리는 API 연동 시 제공됩니다.'
+              ? '프로필 이미지 관리는 API 연동 시 제공됩니다.'
               : '소셜 계정에는 비밀번호 변경이 제공되지 않습니다.'}
           </p>
           {isAdmin(user) ? (
