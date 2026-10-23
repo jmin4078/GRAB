@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getMyWishes } from '../../api/wish/wishes'
+import Avatar from '../../components/Avatar/Avatar'
 import EmptyState from '../../components/EmptyState/EmptyState'
+import AccountSettings from '../../features/auth/components/AccountSettings'
 import AuthLoading from '../../features/auth/components/AuthLoading'
-import NicknameForm from '../../features/auth/components/NicknameForm'
-import PasswordChangeForm from '../../features/auth/components/PasswordChangeForm'
 import {
   isAdmin,
   isSeller,
@@ -43,7 +43,6 @@ export default function MyPage({
 }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
-  const [editing, setEditing] = useState(false)
   const [page, setPage] = useState(0)
   const [orderPage, setOrderPage] = useState(0)
   const [loggingOut, setLoggingOut] = useState(false)
@@ -64,6 +63,11 @@ export default function MyPage({
     authStatus === 'authenticated',
   )
   const orderItems = ordersQuery.data?.content ?? []
+  // 조회 중·실패면 개수를 비워 두고 각 영역의 상태 표시를 따른다(GR-160).
+  const orderCount = ordersQuery.isSuccess
+    ? (ordersQuery.data?.totalElements ?? 0)
+    : null
+  const wishCount = wishesQuery.isSuccess ? totalWishes : null
   const totalOrderPages = ordersQuery.data?.totalPages ?? 0
 
   if (authStatus === 'loading') return <AuthLoading />
@@ -87,74 +91,138 @@ export default function MyPage({
 
   return (
     <section className="page-section">
-      <h1>나의 취향과 주문</h1>
-      <section className="panel account-panel">
+      <h1>My Page</h1>
+      <section className="panel account-panel" aria-labelledby="account-title">
         <div className="account-heading">
-          <div>
-            <h2>내 계정</h2>
+          <Avatar src={user.profileImageUrl} name={user.nickname} />
+          <div className="account-identity">
+            <h2 id="account-title" className="sr-only">
+              내 계정
+            </h2>
             <strong>{user.nickname}</strong>
             <p>{user.email}</p>
-            <small>
-              {user.provider} 계정 ·{' '}
-              {isAdmin(user)
-                ? '운영자'
-                : isSeller(user)
-                  ? '승인된 판매자'
-                  : '일반 회원'}
-            </small>
+            <div className="account-badges">
+              <span className="account-badge">
+                {isAdmin(user)
+                  ? '운영자'
+                  : isSeller(user)
+                    ? '승인된 판매자'
+                    : '일반 회원'}
+              </span>
+            </div>
           </div>
-          <button
-            type="button"
-            className="secondary-button"
-            aria-expanded={editing}
-            onClick={() => setEditing(!editing)}
-          >
-            {editing ? '닫기' : '정보 수정'}
-          </button>
-        </div>
-        {editing && (
-          <>
-            <NicknameForm user={user} notify={notify} />
-            {user.provider === 'LOCAL' && (
-              <PasswordChangeForm notify={notify} />
-            )}
-          </>
-        )}
-        <div className="account-footer">
-          <p>
-            {user.provider === 'LOCAL'
-              ? '프로필 이미지 관리는 API 연동 시 제공됩니다.'
-              : '소셜 계정에는 비밀번호 변경이 제공되지 않습니다.'}
-          </p>
-          {isAdmin(user) ? (
-            <Link className="secondary-button" to="/admin/seller-applications">
-              판매자 신청 심사 ↗
-            </Link>
-          ) : isSeller(user) ? (
-            <Link className="secondary-button" to="/seller">
-              판매자 작업 공간 ↗
-            </Link>
-          ) : (
-            <Link className="secondary-button" to="/seller/apply">
-              판매자 신청 ↗
-            </Link>
-          )}
-          {logoutError && (
-            <p className="form-error" role="alert">
-              {logoutError}
-            </p>
-          )}
-          <button
-            type="button"
-            className="text-link"
-            disabled={loggingOut}
-            onClick={() => void logout()}
-          >
-            {loggingOut ? '로그아웃 중…' : '로그아웃'}
-          </button>
+          <dl className="account-stats">
+            <div>
+              <dt>주문</dt>
+              <dd>{orderCount}</dd>
+            </div>
+            <div>
+              <dt>WISH</dt>
+              <dd>{wishCount}</dd>
+            </div>
+          </dl>
         </div>
       </section>
       <div className="my-columns">
+        <section className="panel order-panel">
+          <div className="panel-heading">
+            <h2>주문</h2>
+            <span>{ordersQuery.data?.totalElements ?? 0}</span>
+          </div>
+          {ordersQuery.isPending ? (
+            <div role="status" aria-live="polite">
+              <EmptyState loading title="주문 목록을 불러오는 중이에요." />
+            </div>
+          ) : ordersQuery.isError ? (
+            <div className="catalog-error" role="alert">
+              <EmptyState
+                title="주문 목록을 불러오지 못했어요."
+                description="잠시 후 다시 시도해주세요."
+              />
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void ordersQuery.refetch()}
+              >
+                다시 시도
+              </button>
+            </div>
+          ) : orderItems.length ? (
+            <>
+              {orderItems.map((order) => {
+                const pending = order.status === 'PAYMENT_PENDING'
+                return (
+                  <div className="compact-item order" key={order.id}>
+                    <span
+                      className={
+                        pending ? 'order-status pending' : 'order-status'
+                      }
+                    >
+                      {buyerOrderStatusText[order.status]}
+                    </span>
+                    <div>
+                      <strong>{order.productName}</strong>
+                      <small>
+                        {order.orderNumber} · 주문일{' '}
+                        {dateLabel(order.orderedAt)}
+                      </small>
+                    </div>
+                    <b>{won(order.totalAmount)}</b>
+                    {/* 행마다 같은 문구라 주문번호를 붙여 링크를 구분한다(보이는 문구는 이름에 포함). */}
+                    {pending ? (
+                      <Link
+                        className="primary-button"
+                        to={`/checkout/${order.id}`}
+                        aria-label={`${order.orderNumber} 결제하기`}
+                      >
+                        결제하기
+                      </Link>
+                    ) : (
+                      <Link
+                        className="secondary-button"
+                        to={`/my/orders/${order.id}`}
+                        aria-label={`${order.orderNumber} 주문 상세`}
+                      >
+                        주문 상세
+                      </Link>
+                    )}
+                  </div>
+                )
+              })}
+              {totalOrderPages > 1 && (
+                <div className="catalog-pagination">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={orderPage === 0}
+                    onClick={() =>
+                      setOrderPage((current) => Math.max(0, current - 1))
+                    }
+                  >
+                    이전
+                  </button>
+                  <span aria-live="polite">
+                    {orderPage + 1} / {totalOrderPages} 페이지
+                  </span>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={!ordersQuery.data?.hasNext}
+                    onClick={() => setOrderPage((current) => current + 1)}
+                  >
+                    다음
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <EmptyState
+              title="아직 주문이 없어요."
+              link="/grab"
+              label="GRAB 둘러보기"
+            />
+          )}
+        </section>
         <section className="panel wish-panel">
           <div className="panel-heading">
             <h2>WISH</h2>
@@ -250,81 +318,14 @@ export default function MyPage({
             />
           )}
         </section>
-        <section className="panel order-panel">
-          <div className="panel-heading">
-            <h2>주문</h2>
-            <span>{ordersQuery.data?.totalElements ?? 0}</span>
-          </div>
-          {ordersQuery.isPending ? (
-            <div role="status" aria-live="polite">
-              <EmptyState loading title="주문 목록을 불러오는 중이에요." />
-            </div>
-          ) : ordersQuery.isError ? (
-            <div className="catalog-error" role="alert">
-              <EmptyState
-                title="주문 목록을 불러오지 못했어요."
-                description="잠시 후 다시 시도해주세요."
-              />
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => void ordersQuery.refetch()}
-              >
-                다시 시도
-              </button>
-            </div>
-          ) : orderItems.length ? (
-            <>
-              {orderItems.map((order) => (
-                <div className="compact-item order" key={order.id}>
-                  <div>
-                    <small>
-                      {order.orderNumber} · {buyerOrderStatusText[order.status]}
-                    </small>
-                    <strong>{order.productName}</strong>
-                    <small>주문일 {dateLabel(order.orderedAt)}</small>
-                    <Link className="text-link" to={`/my/orders/${order.id}`}>
-                      주문 상세 ↗
-                    </Link>
-                  </div>
-                  <b>{won(order.totalAmount)}</b>
-                </div>
-              ))}
-              {totalOrderPages > 1 && (
-                <div className="catalog-pagination">
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={orderPage === 0}
-                    onClick={() =>
-                      setOrderPage((current) => Math.max(0, current - 1))
-                    }
-                  >
-                    이전
-                  </button>
-                  <span aria-live="polite">
-                    {orderPage + 1} / {totalOrderPages} 페이지
-                  </span>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={!ordersQuery.data?.hasNext}
-                    onClick={() => setOrderPage((current) => current + 1)}
-                  >
-                    다음
-                  </button>
-                </div>
-              )}
-            </>
-          ) : (
-            <EmptyState
-              title="아직 주문이 없어요."
-              link="/grab"
-              label="GRAB 둘러보기"
-            />
-          )}
-        </section>
       </div>
+      <AccountSettings
+        user={user}
+        notify={notify}
+        loggingOut={loggingOut}
+        logoutError={logoutError}
+        onLogout={() => void logout()}
+      />
     </section>
   )
 }
