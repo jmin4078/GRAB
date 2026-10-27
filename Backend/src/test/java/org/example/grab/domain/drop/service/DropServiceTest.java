@@ -9,13 +9,13 @@ import org.example.grab.domain.drop.dto.request.OptionRequest;
 import org.example.grab.domain.drop.dto.request.OptionValueRequest;
 import org.example.grab.domain.drop.dto.request.SelectionRequest;
 import org.example.grab.domain.drop.dto.request.ShippingRequest;
-import org.example.grab.domain.category.dto.response.CategoryResponse;
 import org.example.grab.domain.category.service.CategoryService;
 import org.example.grab.domain.drop.dto.response.PublicDropDetailResponse;
 import org.example.grab.domain.drop.dto.response.PublicDropListResponse;
 import org.example.grab.domain.drop.dto.response.PublicDropStockResponse;
 import org.example.grab.domain.drop.dto.response.SellerDropStockResponse;
 import org.example.grab.domain.drop.dto.response.SellerDropWishCountResponse;
+import org.example.grab.domain.drop.dto.PublicDropDetailExtrasProjection;
 import org.example.grab.domain.drop.dto.response.common.DropCategoryResponse;
 import org.example.grab.domain.wish.WishNotice;
 import org.example.grab.domain.wish.service.WishQueryService;
@@ -30,7 +30,6 @@ import org.example.grab.domain.drop.entity.option.DropOptionValueMap;
 import org.example.grab.domain.drop.error.DropErrorCode;
 import org.example.grab.domain.drop.event.DropCanceledEvent;
 import org.example.grab.domain.drop.event.DropPublishedEvent;
-import org.example.grab.domain.seller.service.SellerProfileService;
 import org.example.grab.domain.drop.repository.DropImageRepository;
 import org.example.grab.domain.drop.repository.DropRepository;
 import org.example.grab.global.common.ErrorResponse;
@@ -87,9 +86,6 @@ class DropServiceTest {
     private WishQueryService wishQueryService;
 
     @Mock
-    private SellerProfileService sellerProfileService;
-
-    @Mock
     private ApplicationEventPublisher eventPublisher;
 
     private final ImageStorage imageStorage = new ImageStorage() {
@@ -110,7 +106,7 @@ class DropServiceTest {
     void setUp() {
         dropService = new DropService(
                 org.mockito.Mockito.mock(StockChangePublisher.class),
-                dropRepository, dropImageRepository, categoryService, wishQueryService, sellerProfileService,
+                dropRepository, dropImageRepository, categoryService, wishQueryService,
                 imageStorage, eventPublisher);
     }
 
@@ -570,7 +566,7 @@ class DropServiceTest {
     @DisplayName("공개 상세: 없는 DROP은 DROP_NOT_FOUND")
     void findPublicDrop_notFound() {
         // given
-        given(dropRepository.findById(99L)).willReturn(Optional.empty());
+        given(dropRepository.findWithImagesById(99L)).willReturn(Optional.empty());
 
         // when & then
         assertThatThrownBy(() -> dropService.findPublicDrop(99L))
@@ -584,14 +580,14 @@ class DropServiceTest {
     void findPublicDrop_hidesDraft() {
         // given
         Drop drop = Drop.createDraft(1L);
-        given(dropRepository.findById(10L)).willReturn(Optional.of(drop));
+        given(dropRepository.findWithImagesById(10L)).willReturn(Optional.of(drop));
 
         // when & then
         assertThatThrownBy(() -> dropService.findPublicDrop(10L))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(DropErrorCode.DROP_NOT_FOUND);
-        verifyNoInteractions(categoryService, wishQueryService, sellerProfileService);
+        verify(dropRepository, never()).findPublicDetailExtras(any());
     }
 
     @Test
@@ -601,11 +597,8 @@ class DropServiceTest {
         Drop drop = Drop.createDraft(1L);
         ReflectionTestUtils.setField(drop, "status", DropStatus.CANCELED);
         ReflectionTestUtils.setField(drop, "categoryId", 1L);
-        given(dropRepository.findById(10L)).willReturn(Optional.of(drop));
-        given(categoryService.findCategory(1L))
-                .willReturn(Optional.of(new CategoryResponse(1L, "FASHION", "패션")));
-        given(wishQueryService.countActiveByDropId(10L)).willReturn(3L);
-        given(sellerProfileService.findBrandName(1L)).willReturn(Optional.of("그랩 스튜디오"));
+        given(dropRepository.findWithImagesById(10L)).willReturn(Optional.of(drop));
+        given(dropRepository.findPublicDetailExtras(10L)).willReturn(Optional.of(extras("그랩 스튜디오", 1L, "패션", 3L)));
 
         // when
         PublicDropDetailResponse response = dropService.findPublicDrop(10L);
@@ -758,7 +751,7 @@ class DropServiceTest {
         DropOption available = DropOption.create(drop, 20000L, 5, 1);
         drop.addOption(soldOut);
         drop.addOption(available);
-        given(dropRepository.findById(10L)).willReturn(Optional.of(drop));
+        given(dropRepository.findWithOptionsById(10L)).willReturn(Optional.of(drop));
 
         // when
         PublicDropStockResponse response = dropService.findPublicStocks(10L);
@@ -781,7 +774,7 @@ class DropServiceTest {
         inactive.updateActive(false);
         drop.addOption(active);
         drop.addOption(inactive);
-        given(dropRepository.findById(10L)).willReturn(Optional.of(drop));
+        given(dropRepository.findWithOptionsById(10L)).willReturn(Optional.of(drop));
 
         // when
         PublicDropStockResponse response = dropService.findPublicStocks(10L);
@@ -798,7 +791,7 @@ class DropServiceTest {
         Drop drop = Drop.createDraft(1L);
         ReflectionTestUtils.setField(drop, "status", DropStatus.CANCELED);
         drop.addOption(DropOption.create(drop, 10000L, 5, 0));
-        given(dropRepository.findById(10L)).willReturn(Optional.of(drop));
+        given(dropRepository.findWithOptionsById(10L)).willReturn(Optional.of(drop));
 
         // when
         PublicDropStockResponse response = dropService.findPublicStocks(10L);
@@ -813,7 +806,7 @@ class DropServiceTest {
     void findPublicStocks_hidesDraft() {
         // given
         Drop drop = Drop.createDraft(1L);
-        given(dropRepository.findById(10L)).willReturn(Optional.of(drop));
+        given(dropRepository.findWithOptionsById(10L)).willReturn(Optional.of(drop));
 
         // when & then
         assertThatThrownBy(() -> dropService.findPublicStocks(10L))
@@ -826,7 +819,7 @@ class DropServiceTest {
     @DisplayName("공개 재고: 없는 DROP은 DROP_NOT_FOUND")
     void findPublicStocks_notFound() {
         // given
-        given(dropRepository.findById(99L)).willReturn(Optional.empty());
+        given(dropRepository.findWithOptionsById(99L)).willReturn(Optional.empty());
 
         // when & then
         assertThatThrownBy(() -> dropService.findPublicStocks(99L))
@@ -1100,5 +1093,30 @@ class DropServiceTest {
             images.add(image(UUID.randomUUID()));
         }
         return images;
+    }
+
+    private static PublicDropDetailExtrasProjection extras(String brandName, Long categoryId, String categoryName,
+                                                           Long wishCount) {
+        return new PublicDropDetailExtrasProjection() {
+            @Override
+            public String getBrandName() {
+                return brandName;
+            }
+
+            @Override
+            public Long getCategoryId() {
+                return categoryId;
+            }
+
+            @Override
+            public String getCategoryName() {
+                return categoryName;
+            }
+
+            @Override
+            public Long getWishCount() {
+                return wishCount;
+            }
+        };
     }
 }
