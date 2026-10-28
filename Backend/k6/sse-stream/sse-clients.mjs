@@ -34,8 +34,9 @@ const REFETCH = process.env.REFETCH === '1';
 // REFETCH_LIST=0이면 목록 연결은 구독·알림 수신은 그대로 두고 재조회만 하지 않는다(GR-180 목록 HTTP 영향 분리).
 const REFETCH_LIST = process.env.REFETCH_LIST !== '0';
 const REFRESH_MIN_INTERVAL_MS = 2000;
-// 알림으로 재조회를 예약할 때 대기를 max(2초 간격의 남은 시간, 0~이 값(ms) 무작위)로 한다. 0이면 명세 12절 그대로.
-// 예약은 첫 신호에만 하고 이후 신호는 dirty로 합치므로 신호마다 타이머가 미뤄지지 않고, 2초 간격 뒤에 jitter가 더 붙지 않는다.
+// 알림으로 재조회를 예약할 때 대기를 max(2초 간격의 남은 시간, min(0~이 값(ms) 무작위, 첫 dirty + 2초 − 현재))로 한다.
+// 0이면 분산하지 않는다. 프론트 refreshDelay(GR-209, REALTIME_STOCK.md 12절)와 같은 규칙이다. 예약은 첫 신호에만 하고
+// 이후 신호는 dirty로 합치므로 신호마다 타이머가 미뤄지지 않고, 2초 간격 뒤에 jitter가 더 붙지 않는다.
 // 알림이 모든 연결에 거의 동시에 도착하면 재조회가 한순간에 몰리는지 확인하려는 측정용 옵션이다(GR-180 후속).
 const REFETCH_JITTER_MS = Number(process.env.REFETCH_JITTER_MS || 0);
 const RESYNC_INTERVAL_MS = 30_000;
@@ -129,7 +130,11 @@ function handleFrame(conn, frame) {
     const payload = JSON.parse(data);
     if (event === 'ready') {
         conn.readyAt = now;
-        if (REFETCH && (conn.detail || REFETCH_LIST)) startResync(conn);
+        if (REFETCH && (conn.detail || REFETCH_LIST)) {
+            // 프론트처럼 ready 직후 최신 상태로 한 번 맞추고(ready 동기화, 분산 없음) 주기 재동기화를 건다.
+            markDirty(conn, 'ready');
+            startResync(conn);
+        }
     } else if (event === 'drop-changed') {
         conn.changes.push([now, payload.dropId]);
         if (REFETCH && (conn.detail || REFETCH_LIST)) {
@@ -144,10 +149,23 @@ function handleFrame(conn, frame) {
 // 조회 키 제어기(12절): 신호는 dirty로 모으고, 직전 시작부터 2초가 지났고 실행 중이 아닐 때 한 번 조회한다.
 function markDirty(conn, reason) {
     const key = conn.refetch;
-    key.dirty ??= reason;
+    if (!key.dirty) key.dirtySince = Date.now();
+    if (reason === 'signal') {
+        key.dirty ??= reason;
+    } else {
+        // 주기 재동기화처럼 바로 필요한 사유는 알림 분산 대기 중인 예약을 당긴다(프론트 refreshDelay와 같은 규칙).
+        if (key.timer && key.dirty === 'signal') {
+            clearTimeout(key.timer);
+            key.timer = null;
+        }
+        key.dirty = reason;
+    }
     if (key.running || key.timer || conn.aborted) return;
     const throttle = Math.max(0, key.lastStart + REFRESH_MIN_INTERVAL_MS - Date.now());
-    const wait = reason === 'signal' && REFETCH_JITTER_MS > 0 ? Math.max(throttle, Math.random() * REFETCH_JITTER_MS) : throttle;
+    const budget = Math.max(0, key.dirtySince + REFRESH_MIN_INTERVAL_MS - Date.now());
+    const wait = key.dirty === 'signal' && REFETCH_JITTER_MS > 0
+        ? Math.max(throttle, Math.min(Math.random() * REFETCH_JITTER_MS, budget))
+        : throttle;
     key.timer = setTimeout(() => runRefetch(conn), wait);
 }
 
